@@ -1,0 +1,6 @@
+# libopus (via audiopus_sys) is built with CMake. On this machine CMake would
+# otherwise pick LLVM clang + lld-link, which can't link against the MinGW CRT.
+[env]
+CMAKE_GENERATOR = "MinGW Makefiles"
+CC = "gcc"
+CXX = "g++"

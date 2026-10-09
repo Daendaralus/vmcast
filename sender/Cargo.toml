@@ -1,0 +1,16 @@
+[package]
+name = "vmcast"
+version = "0.1.0"
+edition = "2021"
+description = "Low-latency audio streamer: taps a Voicemeeter bus via the Remote API and sends it over UDP"
+
+[dependencies]
+libloading = "0.8"
+rtrb = "0.3"
+ctrlc = "3"
+opus = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
