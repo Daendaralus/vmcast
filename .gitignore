@@ -10,3 +10,5 @@ android/local.properties
 *.apk
 *.iml
 .idea/
+android/keystore.properties
+*.jks

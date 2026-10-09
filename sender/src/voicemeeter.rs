@@ -153,7 +153,7 @@ impl Remote {
             return Err(format!("VBVMR_Login failed ({rc})"));
         }
         if rc == 1 {
-            eprintln!("Voicemeeter is not running yet; waiting for it...");
+            log!("Voicemeeter is not running yet; waiting for it...");
         }
         Ok(remote)
     }
@@ -210,6 +210,13 @@ impl Remote {
         match self.call0(b"VBVMR_AudioCallbackStart\0")? {
             0 => Ok(()),
             rc => Err(format!("VBVMR_AudioCallbackStart failed ({rc})")),
+        }
+    }
+
+    pub fn unregister(&mut self) {
+        if self.registered {
+            let _ = self.call0(b"VBVMR_AudioCallbackUnregister\0");
+            self.registered = false;
         }
     }
 

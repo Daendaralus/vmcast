@@ -46,7 +46,7 @@ impl Qos {
                 create(&QosVersion { major: 1, minor: 0 }, &mut handle)
             };
             if ok == 0 {
-                eprintln!("qos: QOSCreateHandle failed; packets will not be DSCP-marked");
+                log!("qos: QOSCreateHandle failed; packets will not be DSCP-marked");
                 return None;
             }
             Some(Qos { lib, handle, warned: false })
@@ -80,7 +80,7 @@ impl Qos {
         };
         if ok == 0 && !self.warned {
             self.warned = true;
-            eprintln!(
+            log!(
                 "qos: QOSAddSocketToFlow failed ({}); audio goes out unmarked",
                 std::io::Error::last_os_error()
             );

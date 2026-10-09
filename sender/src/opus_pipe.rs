@@ -96,7 +96,7 @@ impl OpusPipe {
                     emit(&OpusPacket { pos: frame_pos, frames: &self.history }, self.seq);
                     self.seq = self.seq.wrapping_add(1);
                 }
-                Err(e) => eprintln!("opus encode: {e}"),
+                Err(e) => log!("opus encode: {e}"),
             }
             self.pending.clear();
         }

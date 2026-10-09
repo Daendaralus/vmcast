@@ -26,6 +26,17 @@ target\release\vmcast.exe --bus A1
 Options: `--bus A1..A5|B1..B3` (default A1), `--port 6990`, `--max-frames 240`,
 `--no-qos`. The phone connects to it; nothing to configure per client.
 
+Run it in the background at every logon:
+
+```
+target\release\vmcast.exe --install --bus A1
+```
+
+This copies the windowless `vmcastw.exe` to `%LOCALAPPDATA%\vmcast`, adds it to
+`HKCU\...\Run` and starts it. It waits for Voicemeeter and re-attaches whenever
+audio stops (Voicemeeter restarted, engine reset). Log:
+`%LOCALAPPDATA%\vmcast\vmcast.log`. Remove with `vmcast.exe --uninstall`.
+
 Windows Firewall must allow inbound UDP 6990 (admin PowerShell):
 
 ```
@@ -44,10 +55,21 @@ CMake 3.22.1.
 
 ```
 cd android
-$env:JAVA_HOME="$env:LOCALAPPDATA\devtools\jdk17"
-.\gradlew.bat installDebug
+.\gradlew.bat installDebug      # or assembleRelease
 ```
 
+Release builds are signed with the key described in `android/keystore.properties`
+(`storeFile`, `storePassword`, `keyAlias`, `keyPassword`; gitignored). Without
+that file they fall back to the debug key.
+
 The stats panel shows each latency stage: network RTT, measured jitter, buffer fill
-vs target, output latency (includes Bluetooth on recent Android), and underruns.
-"Extra buffer" adds a fixed margin on top of the adaptive target if you hear dropouts.
+vs target, output latency up to the Android audio stack (the Bluetooth link and
+earbud buffer come on top), and underruns. "Extra buffer" adds a fixed margin on
+top of the adaptive target if you hear dropouts.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The vendored libopus in
+`android/app/src/main/cpp/third_party/opus` keeps its own BSD 3-clause license
+(`COPYING` there). Voicemeeter and VBAN are products of VB-Audio Software; this
+project is not affiliated with them.
