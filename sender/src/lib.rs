@@ -71,15 +71,49 @@ fn install(args: &[String]) -> Result<(), String> {
     if !ok {
         return Err("reg add failed".into());
     }
-    Command::new(&dst)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn().map_err(|e| format!("start {}: {e}", dst.display()))?;
+    start_detached(&dst, args)?;
     log!("installed {} (starts at logon: {cmdline})", dst.display());
     log!("log file: {}", dir.join("vmcast.log").display());
     Ok(())
+}
+
+/// Start vmcastw so it outlives whatever launched us. Terminals and IDEs often
+/// run children inside a Windows job object that kills everything when the
+/// host closes or updates, so first try to break away from the job; if the job
+/// forbids that, let Task Scheduler start it (its processes live outside).
+fn start_detached(exe: &std::path::Path, args: &[String]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let spawn = |flags: u32| {
+        Command::new(exe)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+    };
+    if spawn(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB).is_ok() {
+        return Ok(());
+    }
+    // Breakaway denied: one-shot scheduled task, run immediately, then removed.
+    let tr = std::iter::once(format!("\"{}\"", exe.display()))
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let run = |a: &[&str]| Command::new("schtasks").args(a).output().map_or(false, |o| o.status.success());
+    let ok = run(&["/Create", "/F", "/TN", "vmcast-start", "/SC", "ONCE", "/ST", "00:00", "/TR", &tr, "/RL", "LIMITED"])
+        && run(&["/Run", "/TN", "vmcast-start"]);
+    thread::sleep(Duration::from_secs(1));
+    run(&["/Delete", "/F", "/TN", "vmcast-start"]);
+    if ok {
+        Ok(())
+    } else {
+        // Last resort: still inside the job, dies with its host, but runs until then.
+        spawn(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP).map(|_| ()).map_err(|e| format!("start {}: {e}", exe.display()))
+    }
 }
 
 /// Stop a running vmcastw and remove the logon entry. Returns whether anything was removed.

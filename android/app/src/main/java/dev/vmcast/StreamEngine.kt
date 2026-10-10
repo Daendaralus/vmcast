@@ -108,21 +108,35 @@ class StreamEngine(
         return DatagramPacket(b.array(), len, server)
     }
 
-    private fun netLoop() {
-        val s = try {
-            val addr = InetSocketAddress(host, port)
-            server = addr
-            DatagramSocket().apply {
-                connect(addr)
-                soTimeout = 50
-                receiveBufferSize = 256 * 1024
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "socket setup", e)
-            state = "error: ${e.message}"
-            running = false
-            return
+    /**
+     * Ask for a fresh socket. Android pins a socket to the network that was
+     * default when it was created, so after a network change (e.g. Wi-Fi ->
+     * mobile data, then the VPN coming up) the old one may lead nowhere.
+     */
+    fun reconnect() {
+        reconnectRequested = true
+    }
+
+    @Volatile private var reconnectRequested = false
+
+    private fun openSocket(): DatagramSocket? = try {
+        val addr = InetSocketAddress(host, port) // re-resolve: the name may map elsewhere now
+        server = addr
+        DatagramSocket().apply {
+            connect(addr)
+            soTimeout = 50
+            receiveBufferSize = 256 * 1024
         }
+    } catch (e: Exception) {
+        Log.w(TAG, "socket setup", e)
+        state = "no route to $host:$port (${e.message}), retrying"
+        null
+    }
+
+    private fun netLoop() {
+        var s: DatagramSocket? = openSocket()
+        var socketOpenedNs = System.nanoTime()
+        reconnectRequested = false
         state = "connecting to $host:$port"
         val buf = ByteArray(2048)
         val pkt = DatagramPacket(buf, buf.size)
@@ -137,8 +151,24 @@ class StreamEngine(
 
         while (running) {
             val now = System.nanoTime()
+            // Self-heal: no audio for 2 s on this socket (or a network change was
+            // signalled) -> new socket on whatever network is default now.
+            val quietSince = maxOf(lastPacketNs, socketOpenedNs)
+            if (reconnectRequested || s == null || now - quietSince > RECONNECT_AFTER_NS) {
+                if (s != null) Log.i(TAG, if (reconnectRequested) "network changed, reconnecting" else "no audio, reconnecting")
+                reconnectRequested = false
+                s?.close()
+                s = openSocket()
+                socketOpenedNs = now
+                nextHello = 0L
+                if (s == null) {
+                    Thread.sleep(250)
+                    continue
+                }
+            }
+            val sock = s!!
             if (now >= nextHello) {
-                runCatching { s.send(hello()) }
+                runCatching { sock.send(hello()) }
                     .onFailure { Log.w(TAG, "hello", it); state = "send failed: ${it.message}" }
                 nextHello = now + 250_000_000L
             }
@@ -154,12 +184,16 @@ class StreamEngine(
 
             try {
                 pkt.setLength(buf.size)
-                s.receive(pkt)
+                sock.receive(pkt)
             } catch (_: SocketTimeoutException) {
                 continue
             } catch (e: Exception) {
-                if (running) state = "socket error: ${e.message}"
-                return
+                // e.g. ENETUNREACH while the old network goes away: start over on a new socket.
+                if (running) state = "socket error: ${e.message}, reconnecting"
+                sock.close()
+                s = null
+                Thread.sleep(250)
+                continue
             }
             val arrival = System.nanoTime()
             val len = pkt.length
@@ -206,8 +240,7 @@ class StreamEngine(
                 }
             }
         }
-        runCatching { s.send(control(T_BYE, 8)) }
-        s.close()
+        s?.let { runCatching { it.send(control(T_BYE, 8)) }; it.close() }
     }
 
     private fun tuneLoop() {
@@ -283,5 +316,6 @@ class StreamEngine(
         private const val CODEC_OPUS = 1
         private const val HEADER = 24
         private const val TAG = "vmcast"
+        private const val RECONNECT_AFTER_NS = 2_000_000_000L
     }
 }

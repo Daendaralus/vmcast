@@ -92,21 +92,30 @@ class StreamService : Service() {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     }
 
-    /** In Auto mode, switch codec when the default network changes (e.g. leaving home, VPN coming up). */
+    /**
+     * On every switch of the default network (Wi-Fi lost, mobile data taking
+     * over, the VPN coming up on top of it, ...) move the stream to a new socket,
+     * and in Auto mode switch codec if needed.
+     */
     private fun watchNetwork() {
         if (networkCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java)
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = check()
-            override fun onLost(network: Network) = check()
-            private fun check() {
-                main.postDelayed({
-                    val p = params ?: return@postDelayed
-                    val current = engine ?: return@postDelayed
-                    if (p.getStringExtra(EXTRA_CODEC) == CODEC_AUTO && codecFor(p).opus != current.codec.opus) {
-                        restartEngine()
-                    }
-                }, 500) // let the VPN / routes settle
+            private val settle = Runnable {
+                val p = params ?: return@Runnable
+                val current = engine ?: return@Runnable
+                if (p.getStringExtra(EXTRA_CODEC) == CODEC_AUTO && codecFor(p).opus != current.codec.opus) {
+                    restartEngine()
+                } else {
+                    current.reconnect()
+                }
+            }
+            // Called on the binder thread; coalesce bursts (Wi-Fi lost, mobile up, VPN up).
+            override fun onAvailable(network: Network) = schedule()
+            override fun onLost(network: Network) = schedule()
+            private fun schedule() {
+                main.removeCallbacks(settle)
+                main.postDelayed(settle, 500) // let routes settle
             }
         }
         cm.registerDefaultNetworkCallback(cb)
